@@ -5,7 +5,7 @@ it pumps data about what happens when to an lsl stream
 it also receive eeg data from a muse, or simulates it
 This data is recorder along with events
 
-EVeNT KEY:
+EVENT KEY:
 0 - Begin trial
 1 - normal color displayed (blue)
 2 - oddball color displayed (green)
@@ -36,10 +36,15 @@ from multiprocessing import Process, Queue
 from utils.lsl_functions.pyqt5_send_receive import send_eeg, receive_oddball
 from utils.lsl_functions.muse_connect import send_muse
 from utils.pyqt5_widgets import MplCanvas
+from utils.lsl_functions.OpenBCI_connect_windows import send_openbci
 
 SIMULATE = 0
 FILE = 1
 LIVESTREAM = 2
+MUSE = 7
+GANGLION = 8
+CYTON = 9
+DAISY = 10
 
 class MenuWindow(QMainWindow):
     def __init__(self, parent=None):
@@ -58,11 +63,21 @@ class MenuWindow(QMainWindow):
 
         # init data type
         # will always be LIVESTREAM, can set to SIMULATE to debug w/o hardware
-        self.data_type = LIVESTREAM
-        # self.data_type = SIMULATE
+        if True:
+            self.data_type = LIVESTREAM
+            # self.hardware = MUSE
+            # self.hardware = GANGLION
+            self.hardware = CYTON
+            # self.hardware = DAISY
+            # MANUALLY SPECIFY COM PORT IF USING CYTON OR CYTON DAISY
+            # if not specified, will use first available port
+            # should be a string representing the COM port that the Cyton Dongle is connected to. 
+            # e.g for Windows users 'COM3', for MacOS or Linux users '/dev/ttyUSB1
+            self.com_port = None
+            
+        else:
+            self.data_type = SIMULATE
 
-        # self.gl_widget = oddball_glWidget(self)
-        # self.layout.addWidget(self.gl_widget,0,0)
 
         # this is a time elapsed variable - increments every time update runs
         global count
@@ -213,10 +228,22 @@ class MenuWindow(QMainWindow):
             self.receiving_data = Process(target = receive_oddball, kwargs = {'csv_name':self.csv_name , 'q' : self.connected_q}, name = 'receiving data process')
             self.receiving_data.start()
         elif self.data_type == LIVESTREAM:
-            self.sending_data = Process(target = send_muse, kwargs = {'srate' : 250, 'channels' : 4}, name = 'hardware data stream process')
-            self.sending_data.start()
-            self.receiving_data = Process(target = receive_oddball, kwargs = {'csv_name':self.csv_name , 'q' : self.connected_q, 'muse' : True}, name = 'receiving data process')
-            self.receiving_data.start()
+            if self.hardware == MUSE:
+                self.sending_data = Process(target = send_muse, args = (250,4,), name = 'hardware data stream process', daemon = True)
+                self.sending_data.start()
+                self.receiving_data = Process(target = receive_oddball, kwargs = {'csv_name':self.csv_name , 'q' : self.connected_q, 'muse' : True}, name = 'receiving data process')
+                self.receiving_data.start()
+            else:
+                if self.hardware == GANGLION:
+                    print('Ganglion: user must start eeg stream from openbci gui')
+                elif self.hardware == CYTON:
+                    self.sending_data = Process(target = send_openbci, args = (8,self.com_port), name = 'hardware data stream process', daemon = True)
+                    self.sending_data.start()
+                elif self.hardware == DAISY:
+                    self.sending_data = Process(target = send_openbci, args = (16,self.com_port), name = 'hardware data stream process', daemon = True)
+                    self.sending_data.start()
+                self.receiving_data = Process(target = receive_oddball, kwargs = {'csv_name':self.csv_name , 'q' : self.connected_q, 'muse' : False}, name = 'receiving data process')
+                self.receiving_data.start()
 
         return
 

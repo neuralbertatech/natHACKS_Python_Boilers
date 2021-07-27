@@ -16,10 +16,7 @@ More complex and accurate simulation.
 
 import sys
 from math import sqrt, acos, pi, sin
-from OpenGL.GL import *
-from OpenGL.GLU import *
 from PyQt5 import QtGui
-from PyQt5.QtOpenGL import *
 from PyQt5 import QtCore
 from PyQt5.QtWidgets import *
 
@@ -36,6 +33,7 @@ from utils.pyqt5_widgets import MplCanvas
 from utils.lsl_functions.muse_connect import send_muse
 from utils.arduino import arduino_run
 import utils.file_parsing.muse_csv_parser
+from utils.lsl_functions.OpenBCI_connect_windows import send_openbci
 import numpy as np
 import time
 import csv
@@ -73,6 +71,13 @@ class spectrograph_gui(QWidget):
         self.arduino = arduino
         self.arduino_port = arduino_port
         self.arduino_process = None
+        self.init_hardware_type()
+
+        # MANUALLY SPECIFY COM PORT IF USING CYTON OR CYTON DAISY
+        # if not specified, will use first available port
+        # should be a string representing the COM port that the Cyton Dongle is connected to. 
+        # e.g for Windows users 'COM3', for MacOS or Linux users '/dev/ttyUSB1
+        self.com_port = None
 
         if data_type == 'Live stream':
             self.data_type = LIVESTREAM
@@ -95,15 +100,10 @@ class spectrograph_gui(QWidget):
         self.hypnogram_drawn = False
         plt.rcParams.update({'font.size': 8})
         self.is_stream_running = False
-        self.init_hardware_type()
         self.processes = []
         # this is which channel the spectrograph shows
         self.curr_channel = -1
-        if self.data_type == FILE and self.step == True:
-            # for a 4 channel muse file reading
-            self.data = utils.file_parsing.muse_csv_parser.read_csv_file(fname, outer_channels = True)
-        else:
-            self.data = [[] for _ in range(self.channels)]
+        self.data = [[] for _ in range(self.channels)]
         self.csv_length = 0
         self.data_width = 50
 
@@ -235,19 +235,21 @@ class spectrograph_gui(QWidget):
         print('init hardware is running with hardware',self.hardware,'model',self.model)
         if self.hardware == 'Muse':
             if self.model == 'Muse 2':
-                self.srate = 200
+                self.srate = 250
                 self.channels = 4
             elif self.model == 'Muse S':
                 self.srate = 250
                 self.channels = 4
         elif self.hardware == 'openBCI':
             if self.model == 'Ganglion':
-                self.srate = 250
+                self.srate = 200
                 self.channels = 4
             elif self.model == 'Cyton':
+                print('using openbci cyton: REMEMBER TO MANUALLY SPECIFY COM PORT')
                 self.srate = 250
                 self.channels = 8
             elif self.model == 'Cyton-Daisy':
+                print('using openbci cyton daisy: REMEMBER TO MANUALLY SPECIFY COM PORT')
                 self.srate = 250
                 self.channels = 16
         elif self.hardware == 'Blueberry':
@@ -303,10 +305,14 @@ class spectrograph_gui(QWidget):
                 self.sending_data.start()
                 self.receiving_data = Process(target = receive_eeg, args = (gq,False,self.channels,), name = 'receiving data process', daemon = True)
                 self.receiving_data.start()
-            elif self.hardware == 'openBCI' and self.model == 'Ganglion':
+            elif self.hardware == 'openBCI':
+                if self.model == 'Ganglion':
+                    print('Ganglion: user must start eeg stream from openbci gui')
+                elif self.model == 'Cyton' or self.model == 'Cyton-Daisy':
+                    self.sending_data = Process(target = send_openbci, args = (self.channels,self.com_port), name = 'hardware data stream process', daemon = True)
+                    self.sending_data.start()
                 self.receiving_data = Process(target = receive_eeg, args = (gq,False,self.channels,), name = 'receiving data process', daemon = True)
                 self.receiving_data.start()
-                print('Ganglion: user must start eeg stream from openbci gui')
         elif self.data_type == FILE:
             if self.step == False:
                 # we are reading from a file as tho it's live
@@ -316,6 +322,8 @@ class spectrograph_gui(QWidget):
         # updating list of processes
         if self.data_type == FILE and self.step == False:
             self.processes.append(self.reading_file)
+        elif self.model == 'Ganglion':
+            self.processes.append(self.receiving_data)
         else:
             self.processes.extend([self.sending_data, self.receiving_data])
 
@@ -416,7 +424,7 @@ class spectrograph_gui(QWidget):
                     samples.append(sample[0])
                 else:
                     # removing timestamp
-                    samples.append(sample[0][:-1])
+                    samples.append(sample[0][:self.channels])
 
             self.cur.executemany("INSERT INTO data VALUES (" + ','.join('?' for _ in range(self.channels)) + ")", samples)
             self.csv_length += len(samples)
