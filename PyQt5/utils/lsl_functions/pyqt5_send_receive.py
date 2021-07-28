@@ -124,10 +124,10 @@ def sim_asleep_eeg(srate = 250, channels = 4):
 
         time.sleep(1/srate)
 
-def receive_eeg(gq, strip_times = False, data_type = 'EEG', channels = 4):
+def receive_eeg(gq, strip_times = False, channels = 4, data_type = 'EEG'):
         # receives a single eeg stream and queues it
         print('gr start\n')
-        streams = resolve_byprop('type','EEG')
+        streams = resolve_byprop('type',data_type)
         print('gr found streams '+str(streams)+'\n')
         eeg_inlet = StreamInlet(streams[0])
         print('gr found EEG inlet '+str(eeg_inlet)+'\n')
@@ -183,7 +183,7 @@ def receive_blank(csv_name = 'blank_receive_log.csv'):
                 fwriter = csv.writer(file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
                 fwriter.writerow([timestamp,sample])
 
-def receive_oddball(csv_name = 'oddball_receive_log.csv', q = None, muse = False):
+def receive_oddball(csv_name = 'oddball_receive_log.csv', channels = 4, q = None, muse = False):
     # receives data from 2 streams and records them both in csv file
     # one stream is type eeg, other stream is type events, menat to have triggers during oddboll task
     # when it has successfully conncetd to the streams, sends True to the queue
@@ -220,7 +220,7 @@ def receive_oddball(csv_name = 'oddball_receive_log.csv', q = None, muse = False
             eeg_timestamp -= epoch_to_local_diff
         eeg_timestamp += eeg_correction
         eeg_timestamp -= trial_time
-        eeg_sample = eeg_sample[:4]
+        eeg_sample = eeg_sample[:channels]
         # print('gr',eeg_timestamp,eeg_sample)
         # since there usually won't be a sample from the trigger stream, we pull with no wait time
         trigger_sample, trigger_timestamp = trigger_inlet.pull_sample(0.0)

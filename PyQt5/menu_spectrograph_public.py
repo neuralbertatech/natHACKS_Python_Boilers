@@ -22,6 +22,7 @@ import time
 import os
 
 from spectrograph import spectrograph_gui
+from oddball_window import oddball_win
 
 import pdb
 
@@ -70,7 +71,7 @@ class MenuWindow(QMainWindow):
         # starts disabled
         self.type_dropdown = QComboBox()
         self.type_dropdown.setPlaceholderText('Select data type')
-        self.type_dropdown.addItems(['Live stream','File', 'Simulate'])
+        self.type_dropdown.addItems(['Live stream','File', 'Simulate', 'Oddball live','Oddball simulate'])
         self.type_dropdown.activated.connect(self.handle_type_choice)
         self.type_label = QLabel('Select data type')
         self.type_layout.addWidget(self.type_label)
@@ -228,22 +229,32 @@ class MenuWindow(QMainWindow):
             self.type_2_dropdown.activated.disconnect()
         except(TypeError):
             pass
+
+        # first let's handle oddball vs spectrograph
+        if self.data_type == 'Oddball live' or self.data_type == 'Oddball simulate':
+            self.data_window_button.setText('Oddball window')
+            self.data_window_button.clicked.disconnect()
+            self.data_window_button.clicked.connect(self.open_oddball_window)
+        else:
+            # starting spectrograph
+            self.data_window_button.setText('Data window')
+            self.data_window_button.clicked.disconnect()
+            self.data_window_button.clicked.connect(self.open_data_window)
         
         # actually handling choice
         if self.data_type == 'File':
             self.handle_file()
-        elif self.data_type == 'Simulate':
+        elif self.data_type == 'Simulate' or self.data_type == 'Oddball simulate':
             # drop down menu for what to simulate
             self.title.setText('Select simulation type')
             self.type_2_label.setText('Select simulation')
             self.type_2_dropdown.addItems(['','Awake','Asleep'])
             self.type_2_dropdown.activated.connect(self.handle_sim_choice)
             self.type_2_dropdown.setEnabled(True)
-        elif self.data_type == 'Live stream':
+        elif self.data_type == 'Live stream' or self.data_type == 'Oddball live':
             # chose to stream live
             # we need to look for streams from the specified hardware type
             self.handle_hardware()
-        self.data_window_button.setEnabled(True)
     
     def handle_file(self):
         # this opens the system file select dialogue and returns a tuple
@@ -273,7 +284,7 @@ class MenuWindow(QMainWindow):
     def handle_sim_choice(self):
         self.sim_type = self.type_2_dropdown.currentText()
         print('you chose data simulation')
-        print('simulation type', self.sim_type,'opening window')
+        print('simulation type', self.sim_type)
         if self.sim_type != '':
             self.data_window_button.setEnabled(True)
     
@@ -298,6 +309,22 @@ class MenuWindow(QMainWindow):
                     arduino=self.arduino_checkbox.isChecked(), arduino_port=self.arduino_port.text())
             self.data_window.show()
             self.is_data_window_open = True
+    
+    def open_oddball_window(self):
+        # this opens an oddball window
+
+        # oddball window doesn't do arduino. so let's shut that down properly
+        if self.arduino_process is not None:
+            self.arduino_process.terminate()
+            while self.arduino_process.is_alive():
+                time.sleep(0.1)
+            self.arduino_process.close()
+            self.arduino_process = None
+        self.data_window = oddball_win(hardware = self.hardware, model = self.model, sim_type = self.sim_type, \
+            data_type = self.data_type, csv_name = self.csv_name, parent = self)
+        self.data_window.show()
+        self.is_data_window_open = True
+
 
 if __name__ == '__main__':    
     app = QApplication(sys.argv)    

@@ -33,7 +33,7 @@ from PyQt5.QtGui import QPainter, QBrush, QPen, QPolygon
 from pylsl import StreamInfo, StreamOutlet, local_clock, IRREGULAR_RATE
 import numpy as np
 from multiprocessing import Process, Queue
-from utils.lsl_functions.pyqt5_send_receive import send_eeg, receive_oddball
+from utils.lsl_functions.pyqt5_send_receive import *
 from utils.lsl_functions.muse_connect import send_muse
 from utils.pyqt5_widgets import MplCanvas
 from utils.lsl_functions.OpenBCI_connect_windows import send_openbci
@@ -41,43 +41,44 @@ from utils.lsl_functions.OpenBCI_connect_windows import send_openbci
 SIMULATE = 0
 FILE = 1
 LIVESTREAM = 2
-MUSE = 7
-GANGLION = 8
-CYTON = 9
-DAISY = 10
 
-class MenuWindow(QMainWindow):
-    def __init__(self, parent=None):
+class oddball_win(QWidget):
+    def __init__(self, hardware = None, model = None, sim_type = None, \
+            data_type = None, csv_name = None, parent = None):
         super().__init__()
+
+        self.parent = parent
+        self.sim_type = sim_type
+        self.hardware = hardware
+        self.model = model
+        timestamp = str(int(time.time()))
+        self.csv_name = csv_name[:-4] + '_' + timestamp + ".csv"
+        self.init_hardware_type()
+
+        # MANUALLY SPECIFY COM PORT IF USING CYTON OR CYTON DAISY
+        # if not specified, will use first available port
+        # should be a string representing the COM port that the Cyton Dongle is connected to. 
+        # e.g for Windows users 'COM3', for MacOS or Linux users '/dev/ttyUSB1
+        self.com_port = None
+
+        if data_type == 'Oddball live':
+            self.data_type = LIVESTREAM
+        elif data_type == 'Oddball simulate':
+            self.data_type = SIMULATE
+        else:
+            raise Exception('Unknown data type: {} Try "Oddball live" or "Oddball simulate"'.format(data_type))
+
+
         self.setMinimumSize(600,600)
+        self.setWindowIcon(QtGui.QIcon('utils/logo_icon.jpg'))
     
         # setting window title
         self.setWindowTitle('Oddball Window')
         
         # init layout
         self.layout = QGridLayout()
-        self.widget = QWidget()
-        self.widget.setLayout(self.layout)
-        self.setCentralWidget(self.widget)
+        self.setLayout(self.layout)
         # self.layout.setContentsMargins(100,100,100,100)
-
-        # init data type
-        # will always be LIVESTREAM, can set to SIMULATE to debug w/o hardware
-        if True:
-            self.data_type = LIVESTREAM
-            # self.hardware = MUSE
-            # self.hardware = GANGLION
-            self.hardware = CYTON
-            # self.hardware = DAISY
-            # MANUALLY SPECIFY COM PORT IF USING CYTON OR CYTON DAISY
-            # if not specified, will use first available port
-            # should be a string representing the COM port that the Cyton Dongle is connected to. 
-            # e.g for Windows users 'COM3', for MacOS or Linux users '/dev/ttyUSB1
-            self.com_port = None
-            
-        else:
-            self.data_type = SIMULATE
-
 
         # this is a time elapsed variable - increments every time update runs
         global count
@@ -113,7 +114,6 @@ class MenuWindow(QMainWindow):
         self.new_trial_timer.setSingleShot(True)
         self.new_trial_timer.timeout.connect(self.start_trial)
 
-        self.csv_name = 'oddball_log_' + str(time.time()) + '.csv'
         self.is_stream_running = False
         self.streams_connected = False
         # here is a queue for checking whjhether streams are cinnected
@@ -143,6 +143,35 @@ class MenuWindow(QMainWindow):
         self.running_trial = False
         self.display_instructions()
 
+    def init_hardware_type(self):
+        # this function should run once, during __init__
+        # let's set channels, sample rate, and expected data range based on hardware type
+
+        print('init hardware is running with hardware',self.hardware,'model',self.model)
+        if self.hardware == 'Muse':
+            if self.model == 'Muse 2':
+                self.srate = 250
+                self.channels = 4
+            elif self.model == 'Muse S':
+                self.srate = 250
+                self.channels = 4
+        elif self.hardware == 'openBCI':
+            if self.model == 'Ganglion':
+                self.srate = 200
+                self.channels = 4
+            elif self.model == 'Cyton':
+                print('using openbci cyton: REMEMBER TO MANUALLY SPECIFY COM PORT')
+                self.srate = 250
+                self.channels = 8
+            elif self.model == 'Cyton-Daisy':
+                print('using openbci cyton daisy: REMEMBER TO MANUALLY SPECIFY COM PORT')
+                self.srate = 250
+                self.channels = 16
+        elif self.hardware == 'Blueberry':
+            if self.model == 'Prototype':
+                self.srate = 250
+                self.channels = 4
+
         
     def handle_streams_connected(self):
         # runs when the streams_connected signal is received
@@ -159,13 +188,13 @@ class MenuWindow(QMainWindow):
         self.show_stim = True
         self.stim_end_timer.start(1000)
         self.trigger_outlet.push_sample([self.stim_code])
-        self.widget.update()
+        self.update()
         
     def end_stim(self):   
         print('ending stim')
         self.show_stim = False
         self.trigger_outlet.push_sample([11])
-        self.widget.update()
+        self.update()
         if not self.finished:
             self.new_trial_timer.start(1000)
         else:
@@ -223,26 +252,30 @@ class MenuWindow(QMainWindow):
         print('the stream data function is running in the pyqt5 window')
         
         if self.data_type == SIMULATE:
-            self.sending_data = Process(target = send_eeg, args = (100,4,True,), name = 'sim data stream process')
+            if self.sim_type == 'Awake':
+                self.sending_data = Process(target = sim_awake_eeg, args = (self.srate,self.channels,), name = 'sim data stream process', daemon = True)
+            elif self.sim_type == 'Asleep':
+                self.sending_data = Process(target = sim_asleep_eeg, args = (self.srate,self.channels,), name = 'sim data stream process', daemon = True)
+            else:
+                self.sending_data = Process(target = send_eeg, args = (self.srate,self.channels,True,), name = 'sim data stream process', daemon = True)
             self.sending_data.start()
-            self.receiving_data = Process(target = receive_oddball, kwargs = {'csv_name':self.csv_name , 'q' : self.connected_q}, name = 'receiving data process')
+            self.receiving_data = Process(target = receive_oddball, kwargs = {'csv_name':self.csv_name , 'q' : self.connected_q, 'channels' : self.channels}, name = 'receiving data process')
             self.receiving_data.start()
         elif self.data_type == LIVESTREAM:
-            if self.hardware == MUSE:
+            if self.hardware == 'Muse':
                 self.sending_data = Process(target = send_muse, args = (250,4,), name = 'hardware data stream process', daemon = True)
                 self.sending_data.start()
-                self.receiving_data = Process(target = receive_oddball, kwargs = {'csv_name':self.csv_name , 'q' : self.connected_q, 'muse' : True}, name = 'receiving data process')
+                self.receiving_data = Process(target = receive_oddball, kwargs = {'csv_name':self.csv_name , 'q' : self.connected_q, 'muse' : True, 'channels' : self.channels}, name = 'receiving data process')
                 self.receiving_data.start()
-            else:
-                if self.hardware == GANGLION:
+            elif self.hardware == 'openBCI':
+                if self.model == 'Ganglion':
                     print('Ganglion: user must start eeg stream from openbci gui')
-                elif self.hardware == CYTON:
-                    self.sending_data = Process(target = send_openbci, args = (8,self.com_port), name = 'hardware data stream process', daemon = True)
+                elif self.model == 'Cyton':
+                    self.sending_data = Process(target = send_openbci, args = (self.channels,self.com_port), name = 'hardware data stream process', daemon = True)
+                elif self.model == 'Cyton-Daisy':
+                    self.sending_data = Process(target = send_openbci, args = (self.channels,self.com_port), name = 'hardware data stream process', daemon = True)
                     self.sending_data.start()
-                elif self.hardware == DAISY:
-                    self.sending_data = Process(target = send_openbci, args = (16,self.com_port), name = 'hardware data stream process', daemon = True)
-                    self.sending_data.start()
-                self.receiving_data = Process(target = receive_oddball, kwargs = {'csv_name':self.csv_name , 'q' : self.connected_q, 'muse' : False}, name = 'receiving data process')
+                self.receiving_data = Process(target = receive_oddball, kwargs = {'csv_name':self.csv_name , 'q' : self.connected_q, 'muse' : False, 'channels' : self.channels}, name = 'receiving data process')
                 self.receiving_data.start()
 
         return
@@ -315,7 +348,7 @@ class MenuWindow(QMainWindow):
     def global_update(self):
         global count
         count += 1
-        self.widget.update()
+        self.update()
 
     
     def triggered(self):
@@ -377,6 +410,6 @@ class Emitter(QtCore.QThread):
 
 if __name__ == '__main__':    
     app = QApplication(sys.argv)    
-    win = MenuWindow() 
+    win = oddball_win() 
     win.show() 
     sys.exit(app.exec())
